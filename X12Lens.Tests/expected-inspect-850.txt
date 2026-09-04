@@ -1,0 +1,12 @@
+File          850-sample.edi
+Delimiters    element '*'   component '>'   repetition '^'   segment '~'
+
+Interchange   control 000000101   version 00501   usage P (production)
+  Sender      ZZ / DEMOSENDER01
+  Receiver    ZZ / DEMORECEIVER01
+  Created     2026-07-31 14:22
+  Contents    1 functional group, 2 transaction sets, 30 segments
+
+  Group       control 101   PO (Purchase Order)   version 005010
+    Transaction set   control 0001   850 Purchase Order   15 segments
+    Transaction set   control 0002   850 Purchase Order   11 segments

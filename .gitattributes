@@ -1,0 +1,9 @@
+# The test suite byte-compares the samples/*.edi fixtures and
+# X12Lens.Tests/expected-inspect-850.txt against parser and CLI output, so line
+# endings are load-bearing here rather than cosmetic.
+#
+# Without this file, Git's autocrlf converts them to CRLF on a Windows checkout
+# while Linux CI checks out LF. CI would stay green while a fresh Windows clone
+# failed, which is the worst shape a test failure can take. Pinning LF matches
+# both CI and the working tree these 86 tests were verified against.
+* text=auto eol=lf
