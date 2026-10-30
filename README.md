@@ -2,13 +2,13 @@
 
 [![build](https://github.com/daneleblanc/X12Lens/actions/workflows/ci.yml/badge.svg)](https://github.com/daneleblanc/X12Lens/actions/workflows/ci.yml)
 
-A small .NET 8 library and command line tool that reads an ASC X12 EDI interchange and shows
-you what is actually inside it.
+A small .NET 8 library and command line tool that reads an ASC X12 EDI interchange and tells
+you what's in it.
 
 I coordinate EDI for a manufacturer, through managed platforms rather than by hand. When a
-trading partner says a file was rejected, the useful question is always the same: what is in
-the envelope, and where does it stop making sense. X12Lens is the tool that answers that,
-written from the public X12 specification.
+trading partner says a file was rejected, the question is always the same: what's in the
+envelope, and where does it stop making sense. I wrote X12Lens to answer that from the public
+X12 spec, without a translator in the middle.
 
 ## What it looks like
 
@@ -29,11 +29,10 @@ Interchange   control 000000101   version 00501   usage P (production)
     Transaction set   control 0002   850 Purchase Order   11 segments
 ```
 
-That output is not pasted from memory. It is pinned by a test
-(`InspectCommandTests.Inspect_MatchesTheOutputPublishedInTheReadme`), so if the program's
-output changes and this README does not, the build fails.
+A test (`InspectCommandTests.Inspect_MatchesTheOutputPublishedInTheReadme`) pins that output,
+so if the program changes and this README doesn't, the build fails.
 
-When a file is broken, the tool says where:
+When a file is broken, it says where:
 
 ```
 $ dotnet run --project X12Lens.Cli -- inspect broken.edi
@@ -41,12 +40,11 @@ Could not parse broken.edi: The 850 transaction set with control number 0002 is 
 terminated: no SE segment. (segment 18, ST)
 ```
 
-## Validating control-number balances
+## Validating control numbers and counts
 
-A file can be perfectly well formed, in the sense above, and still be wrong: X12 gives a
-sender no mechanism to enforce that a trailer repeats the number or count its header already
-declared. `validate` runs the six checks a trading partner's own EDI translator runs before
-anything else:
+A file can parse fine and still be wrong. X12 doesn't make a sender prove that a trailer
+repeats the control number or count its header declared, so `validate` runs the 6 checks a
+trading partner's translator runs before it looks at anything else:
 
 | Check | What it compares |
 |---|---|
@@ -66,16 +64,15 @@ broken-count.edi: 1 balance issue.
   [SE01_SEGMENT_COUNT] SE declares 99 segments but the interchange has 15. (segment 17, SE)
 ```
 
-Exit code `3` means the file parsed but did not balance, distinct from `1` (could not parse
-at all). A green `inspect` and a red `validate` on the same file is a real, common outcome,
-not a contradiction.
+Exit code `3` means the file parsed but didn't balance. `1` means it couldn't be parsed at
+all. A green `inspect` and a red `validate` on the same file happens a lot in practice.
 
-## Generating a 997 Functional Acknowledgment
+## Generating a 997
 
-`ack` builds a 997 that reports back to the sender, deciding accept or reject from exactly
-the same six balance checks `validate` runs: a transaction set that fails its own ST02/SE02
-or SE01 check comes back `AK5*R*5`; a group whose own GS06/GE02 or GE01 does not balance
-comes back `AK9` rejected even if every transaction set inside it was individually fine.
+`ack` builds a 997 Functional Acknowledgment back to the sender. Accept or reject comes from the
+same 6 checks `validate` runs: a transaction set that fails its own ST02/SE02 or SE01 check
+comes back `AK5*R*5`, and a group whose GS06/GE02 or GE01 doesn't balance comes back `AK9`
+rejected even if every transaction set inside it was fine on its own.
 
 ```
 $ dotnet run --project X12Lens.Cli -- ack samples/850-sample.edi
@@ -93,23 +90,21 @@ GE*1*1~
 IEA*1*000000001~
 ```
 
-`--out <file>` writes the acknowledgment to a file instead of stdout. Scope, stated plainly:
-this reports accept or reject at the whole-transaction-set level only. AK3/AK4 segment level
-and element level detail are not implemented, so a transaction set can only come back whole
-or rejected, never "accepted with errors". Interchange-level problems (ISA13/IEA02, IEA01)
-are a TA1 interchange acknowledgment's job in real EDI, not a 997's, and X12Lens does not
-generate a TA1.
+`--out <file>` writes it to a file instead of stdout.
+
+Scope: this is accept/reject at the transaction set level only. There's no AK3/AK4 segment or
+element detail, so a set comes back whole or rejected, never "accepted with errors".
+Interchange-level problems (ISA13/IEA02, IEA01) belong to a TA1, which is a different document,
+and X12Lens doesn't generate one.
 
 ## Why X12 is harder than it looks
 
-X12 is a flat text format, so the first instinct is to split on `*` and `~` and get on with
-your day. That is wrong, and it is wrong in a way that only shows up once you are in
-production with a second trading partner.
+X12 is flat text, so the first instinct is to split on `*` and `~` and move on. That works
+until the second trading partner shows up.
 
-**The delimiters are not configuration. Every file declares its own, inside itself.** The ISA
-segment is the one fixed width segment in the standard, exactly so that a reader can find the
-delimiters before it knows how to split anything. It is 106 characters, and the positions
-that matter are:
+**The delimiters aren't configuration. Every file declares its own, inside itself.** The ISA
+segment is the one fixed width segment in the standard, so a reader can find the delimiters
+before it knows how to split anything. It's 106 characters, and the positions that matter are:
 
 | Position | What lives there |
 |---|---|
@@ -120,49 +115,44 @@ that matter are:
 | 105 | ISA16, the component element separator |
 | 106 | The segment terminator |
 
-**ISA11 is the trap.** Through version 00401 it was the interchange control standards
-identifier and its value was always the letter `U`. From version 00501 the same position was
-repurposed as the repetition separator. So the meaning of character 83 depends on what is
-written at characters 85 to 89, and a parser has to read the version before it can interpret
-the delimiter. X12Lens does that in `X12Delimiters.Detect`, and it is tolerant of the real
-world case where a partner has moved to 00501 but still sends the legacy `U`.
+**ISA11 changed meaning between versions.** Through 00401 it was the interchange control
+standards identifier and was always the letter `U`. From 00501 the same position became the
+repetition separator. So what character 83 means depends on what's written at 85 to 89, and the
+parser has to read the version before it can read that delimiter. `X12Delimiters.Detect` does
+that, and it tolerates the common case where a partner moved to 00501 but still sends `U`.
 
-Two other things that bite:
+2 other things that bite:
 
-- **Files arrive in two shapes.** Half are pretty printed with one segment per line; half are
-  a single 40,000 character line. Both are valid and must parse identically. So line breaks
-  have to be stripped, except that a minority of partners use a line feed as their segment
-  terminator, in which case stripping line breaks erases every segment boundary in the file.
-  `X12Tokenizer` handles this by only removing a line break character the interchange has not
-  claimed for itself.
-- **Omitted elements are ordinary.** A sender may simply stop early rather than pad out
-  trailing separators, so a `PO1` with 6 elements and a `PO1` with 25 are both correct.
-  Asking for an element that is not there returns an empty string rather than throwing.
+- **Files arrive in 2 shapes.** Half are pretty printed with one segment per line, half are one
+  40,000 character line. Both are valid and have to parse the same. So line breaks get stripped,
+  except some partners use a line feed as their segment terminator, and stripping those erases
+  every segment boundary in the file. `X12Tokenizer` only removes a line break character the
+  interchange hasn't claimed for itself.
+- **Omitted elements are normal.** A sender can just stop early instead of padding out trailing
+  separators, so a `PO1` with 6 elements and a `PO1` with 25 are both correct. Asking for an
+  element that isn't there returns an empty string instead of throwing.
 
-## Design decisions, and why
+## Design decisions
 
-These are the choices I would expect to be asked about.
+The choices I'd expect to be asked about:
 
-**Elements are indexed from 1.** `segment[3]` is BEG03. Every partner specification, every
-implementation guide and every support ticket names elements by their 1-based ordinal, so a
-parser that silently shifts by one turns every conversation with a trading partner into an
-off-by-one argument.
+**Elements are indexed from 1.** `segment[3]` is BEG03. Every partner spec, implementation
+guide and support ticket names elements by their 1-based ordinal. A parser that shifts by one
+turns every conversation with a trading partner into an off-by-one argument.
 
-**A transaction set holds its own ST and SE segments.** SE01 declares the number of segments
-in the transaction set counting the ST and the SE themselves. Keeping them inside
-`TransactionSet.Segments` means `Segments.Count` compares directly against SE01 with no
-arithmetic in between, and that comparison is one of the most common real world X12 failures.
-`TransactionSet.Body` gives you the content without the wrapper when that is what you want.
+**A transaction set keeps its own ST and SE.** SE01 counts the ST and SE themselves, so keeping
+them inside `TransactionSet.Segments` means `Segments.Count` compares straight against SE01 with
+no arithmetic. That comparison is one of the most common X12 failures I see.
+`TransactionSet.Body` gives you the contents without the wrapper when you want that.
 
-**Errors are loud and specific.** Every unexpected segment raises `X12ParseException` carrying
-the segment id and its 1-based position, and the message says what was expected. A parser that
-quietly skips what it does not understand cannot tell you what is wrong with a file, which is
-the entire reason to open one.
+**Errors say what and where.** Every unexpected segment raises `X12ParseException` with the
+segment id, its 1-based position, and what was expected. A parser that skips what it doesn't
+understand can't tell you what's wrong with the file, and that's the reason I'm opening it.
 
-**One interchange per document, on purpose.** Batched files with several ISA and IEA pairs are
-real, and they are rejected here with a specific message rather than half parsed. The
-delimiters are declared per interchange, so a batch could legally change them partway through
-the file. That is a real feature, not a footnote, and it is on the roadmap rather than faked.
+**One interchange per document.** Batched files with several ISA/IEA pairs exist, and they're
+rejected with a specific message instead of half parsed. Delimiters are declared per
+interchange, so a batch could legally change them partway through. That's on the roadmap, not
+faked.
 
 ## Running it
 
@@ -216,13 +206,13 @@ var quantities = interchange.AllSegments
 
 ## The sample files
 
-Every `.edi` file in `samples/` was written by hand from the public X12 specification. None of
-them came from an employer, a customer or a trading partner, scrubbed or otherwise. The sender
-and receiver ids are `DEMOSENDER01` and `DEMORECEIVER01`, the qualifiers are `ZZ` (mutually
-defined), and the phone number is in the 555 range. Scrubbing a real interchange reliably is
-harder than writing one, so no real interchange was used at any point.
+Every `.edi` file in `samples/` was written by hand from the public X12 spec. None came from an
+employer, a customer or a trading partner, scrubbed or otherwise. Sender and receiver are
+`DEMOSENDER01` and `DEMORECEIVER01`, the qualifiers are `ZZ` (mutually defined), and the phone
+number is a 555. Scrubbing a real interchange properly is harder than writing one, so I didn't
+try.
 
-The four files exist to cover different shapes rather than different business scenarios:
+The 4 files cover different shapes, not different business scenarios:
 
 | File | What it exercises |
 |---|---|
@@ -233,19 +223,16 @@ The four files exist to cover different shapes rather than different business sc
 
 ## Not done yet
 
-Stated plainly, because a README that implies more than the code does is worse than no README.
-
-- **No AK3/AK4 segment or element level detail in the generated 997.** A transaction set can
-  only come back whole or rejected, never "accepted with errors". Real and common, left out
-  on purpose.
-- **No TA1 interchange acknowledgment.** ISA13/IEA02 and IEA01 balance problems are `validate`
-  findings, not something `ack` acts on, because a real TA1 is a different document from a 997.
-- **No transaction set schemas.** X12Lens validates the envelope, not the contents of an 850.
-  It will happily parse a purchase order with nonsense in it, because envelope structure and
+- **No AK3/AK4 segment or element detail in the 997.** A transaction set comes back whole or
+  rejected, never "accepted with errors".
+- **No TA1.** ISA13/IEA02 and IEA01 problems show up in `validate`, but `ack` doesn't act on
+  them, since a TA1 is a different document from a 997.
+- **No transaction set schemas.** X12Lens validates the envelope, not the contents of an 850. It
+  will parse a purchase order with nonsense in it without complaint. Envelope structure and
   business content are different problems.
 - **No batched interchanges.** See the design note above.
-- **No streaming.** Files are read into memory whole, which is fine at EDI file sizes and
-  would not be for a 2 GB archive.
+- **No streaming.** Files are read into memory whole. Fine at EDI file sizes, not fine for a
+  2 GB archive.
 
 ## License
 
